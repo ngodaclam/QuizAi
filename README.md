@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="frontend/mentora/public/Gemini_Generated_Image_pp5mjdpp5mjdpp5m.png" alt="TLAi logo" width="280" />
+<img src="frontend/quizai/public/Gemini_Generated_Image_pp5mjdpp5mjdpp5m.png" alt="TLAi logo" width="280" />
 
 # TLAi — AI Learning Assistant
 
@@ -149,7 +149,7 @@ TLAi/
 │   ├── utils/
 │   └── server.js
 └── frontend/
-    └── mentora/
+    └── quizai/
         ├── src/
         └── public/
 ```
@@ -224,7 +224,7 @@ npm run dev
 
 **Install dependencies:**
 ```bash
-cd frontend/mentora
+cd frontend/quizai
 npm install
 ```
 

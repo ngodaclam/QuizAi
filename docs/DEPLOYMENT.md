@@ -50,7 +50,7 @@ Chọn **Add New → Project**, import repo này:
 | Thiết lập | Giá trị |
 |---|---|
 | Framework Preset | Vite |
-| Root Directory | `frontend/mentora` |
+| Root Directory | `frontend/quizai` |
 | Install Command | `npm ci` |
 | Build Command | `npm run build` |
 | Output Directory | `dist` |
