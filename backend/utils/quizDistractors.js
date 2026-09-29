@@ -154,22 +154,54 @@ export const buildImportedQuizQuestions = (sourceQuestions, generatedItems, { ra
 
 const serviceError = (error) => {
   if (error instanceof QuizDistractorError) return error;
-  const status = Number(error?.status ?? error?.statusCode ?? error?.code);
-  // Inspect messages only to classify, never expose upstream text or API keys.
-  const message = String(error?.message || "");
-  if (status === 429 || /RESOURCE_EXHAUSTED|quota exceeded|rate limit/iu.test(message)) {
-    return new QuizDistractorError("Gemini đã hết hạn mức hoặc đang giới hạn lượt gọi. Vui lòng thử lại sau hoặc kiểm tra hạn mức API.", "AI_QUOTA_EXCEEDED", 429);
+  // The SDK can store Google's structured error response in Error.message.
+  let payload;
+  try { payload = JSON.parse(error?.message); } catch { /* Plain-text/network error. */ }
+  const upstream = payload?.error ?? error?.error ?? error?.response?.data?.error;
+  const status = [error?.status, error?.statusCode, error?.code, error?.response?.status, upstream?.code]
+    .map(Number).find((value) => Number.isInteger(value) && value >= 400 && value <= 599);
+  const providerStatuses = ["INVALID_ARGUMENT", "FAILED_PRECONDITION", "UNAUTHENTICATED", "PERMISSION_DENIED",
+    "NOT_FOUND", "RESOURCE_EXHAUSTED", "INTERNAL", "UNAVAILABLE", "DEADLINE_EXCEEDED"];
+  const providerStatus = [upstream?.status, error?.status, error?.code].find((value) => providerStatuses.includes(value));
+  const networkCodes = ["ENOTFOUND", "EAI_AGAIN", "ECONNRESET", "ECONNREFUSED", "ETIMEDOUT",
+    "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_SOCKET"];
+  const networkCode = [error?.code, error?.cause?.code].find((value) => networkCodes.includes(value));
+  // Classify using upstream text, but keep keys, prompts and raw responses out of logs/UI.
+  const message = [error?.message, upstream?.message, error?.cause?.message].filter((value) => typeof value === "string").join(" ");
+  const failure = (text, code, statusCode) => Object.assign(new QuizDistractorError(text, code, statusCode), {
+    upstreamStatus: status ?? null, providerStatus: providerStatus ?? null, networkCode: networkCode ?? null,
+  });
+  if (status === 429 || providerStatus === "RESOURCE_EXHAUSTED" || /RESOURCE_EXHAUSTED|quota exceeded|rate limit/iu.test(message)) {
+    return failure("Gemini đã hết hạn mức hoặc đang giới hạn lượt gọi. Vui lòng thử lại sau hoặc kiểm tra hạn mức API.", "AI_QUOTA_EXCEEDED", 429);
   }
-  if (status === 401 || status === 403 || /API_KEY_INVALID|API key not valid|invalid api key/iu.test(message)) {
-    return new QuizDistractorError("Khóa Gemini không hợp lệ hoặc chưa có quyền truy cập. Vui lòng kiểm tra GEMINI_API_KEY.", "AI_AUTH_ERROR", 503);
+  if (status === 401 || status === 403 || ["UNAUTHENTICATED", "PERMISSION_DENIED"].includes(providerStatus)
+    || /API_KEY_INVALID|API_KEY_EXPIRED|API key not valid|invalid api key|API key expired|API key was reported as leaked/iu.test(message)) {
+    return failure("Khóa Gemini không hợp lệ, hết hạn, bị chặn hoặc chưa có quyền truy cập. Vui lòng kiểm tra GEMINI_API_KEY.", "AI_AUTH_ERROR", 503);
   }
-  if (status === 404) {
-    return new QuizDistractorError("Mô hình Gemini đang chọn không khả dụng với API key này. Vui lòng kiểm tra GEMINI_MODEL và quyền truy cập mô hình.", "AI_MODEL_UNAVAILABLE", 503);
+  if (status === 404 || providerStatus === "NOT_FOUND") {
+    return failure("Mô hình Gemini đang chọn không khả dụng với API key này. Vui lòng kiểm tra GEMINI_MODEL và quyền truy cập mô hình.", "AI_MODEL_UNAVAILABLE", 503);
   }
-  if (["AbortError", "TimeoutError"].includes(error?.name) || /timed?\s*out|timeout|aborted/iu.test(message)) {
-    return new QuizDistractorError("Gemini phản hồi quá lâu. Vui lòng thử tạo lại các đáp án.", "AI_TIMEOUT", 504);
+  if (status === 402) {
+    return failure("Gemini yêu cầu kiểm tra thanh toán hoặc số dư của dự án API. Vui lòng kiểm tra dự án chứa GEMINI_API_KEY.", "AI_BILLING_REQUIRED", 503);
   }
-  return new QuizDistractorError("Chưa thể kết nối Gemini để tạo đáp án. Vui lòng thử lại sau.", "AI_SERVICE_ERROR", 502);
+  if (providerStatus === "FAILED_PRECONDITION" || (status === 400 && /FAILED_PRECONDITION|billing|country|region|location is not supported/iu.test(message))) {
+    return failure("Dự án Gemini chưa đáp ứng điều kiện sử dụng. Vui lòng kiểm tra thanh toán và khu vực được hỗ trợ của dự án API.", "AI_PRECONDITION_FAILED", 503);
+  }
+  if (status === 400 || providerStatus === "INVALID_ARGUMENT") {
+    return failure("Gemini từ chối yêu cầu tạo đáp án (HTTP 400). Cần kiểm tra GEMINI_MODEL và các tham số yêu cầu trong backend.", "AI_BAD_REQUEST", 502);
+  }
+  if ([408, 504].includes(status) || providerStatus === "DEADLINE_EXCEEDED"
+    || ["ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT"].includes(networkCode)
+    || ["AbortError", "TimeoutError"].includes(error?.name) || /timed?\s*out|timeout|aborted/iu.test(message)) {
+    return failure("Gemini phản hồi quá lâu. Vui lòng thử tạo lại các đáp án.", "AI_TIMEOUT", 504);
+  }
+  if (status >= 500 || ["INTERNAL", "UNAVAILABLE"].includes(providerStatus)) {
+    return failure("Dịch vụ Gemini đang quá tải hoặc gặp lỗi tạm thời. Vui lòng thử lại sau để tiếp tục các câu còn thiếu.", "AI_PROVIDER_UNAVAILABLE", 503);
+  }
+  if (networkCode || /fetch failed|network error|ECONNRESET|ENOTFOUND|EAI_AGAIN/iu.test(message)) {
+    return failure("Backend không kết nối được tới Gemini. Vui lòng kiểm tra kết nối mạng của dịch vụ Render rồi thử lại.", "AI_NETWORK_ERROR", 502);
+  }
+  return failure("Chưa thể tạo đáp án bằng Gemini. Vui lòng thử lại hoặc liên hệ quản trị viên để kiểm tra nhật ký lỗi.", "AI_SERVICE_ERROR", 502);
 };
 
 const responseSchema = (count) => ({
@@ -205,7 +237,7 @@ export const generateImportedQuizBatch = async (sourceQuestions, {
     if (!apiKey?.trim()) {
       throw new QuizDistractorError("Chưa cấu hình GEMINI_API_KEY để tự tạo đáp án trắc nghiệm.", "AI_NOT_CONFIGURED", 503);
     }
-    const client = new GoogleGenAI({ apiKey, httpOptions: { timeout: REQUEST_TIMEOUT_MS } });
+    const client = new GoogleGenAI({ apiKey: apiKey.trim(), httpOptions: { timeout: REQUEST_TIMEOUT_MS } });
     generateContent = (request) => client.models.generateContent(request);
   }
   const contents = JSON.stringify(pending.map((item, id) => ({ id, question: item.question, correctAnswer: item.correctAnswer })));
@@ -235,7 +267,15 @@ Return only the JSON array matching the requested schema. Do not include questio
         },
       });
     } catch (error) {
-      throw serviceError(error);
+      const failure = serviceError(error);
+      console.error("Gemini quiz generation failed", {
+        code: failure.code,
+        upstreamStatus: failure.upstreamStatus ?? null,
+        providerStatus: failure.providerStatus ?? null,
+        networkCode: failure.networkCode ?? null,
+        model: typeof model === "string" && /^(?:models\/)?gemini-[a-z0-9.-]{1,100}$/u.test(model) ? model : "[custom or invalid model]",
+      });
+      throw failure;
     }
     try {
       const generatedItems = JSON.parse(response?.text);

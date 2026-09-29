@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { ApiError } from "@google/genai";
 import { buildImportedQuizQuestions, buildQuestionFromSourceOptions, generateImportedQuizBatch, getImportedQuestionIssue, requiresOriginalOptions, QuizDistractorError } from "../utils/quizDistractors.js";
 
 const single = [{ question: "Thủ đô Việt Nam là gì?", answer: "B. Hà Nội" }];
@@ -193,7 +194,8 @@ test("missing key throws a typed error without terminating the server", async ()
   await assert.rejects(generateImportedQuizBatch(single, { apiKey: "" }), (error) => error instanceof QuizDistractorError && error.code === "AI_NOT_CONFIGURED" && error.statusCode === 503);
 });
 
-test("service failures are safe, friendly, and never retried", async () => {
+test("service failures are safe, friendly, and never retried", async (t) => {
+  t.mock.method(console, "error", () => {});
   const failures = [
     [{ status: 429 }, "AI_QUOTA_EXCEEDED", 429],
     [{ status: 401 }, "AI_AUTH_ERROR", 503],
@@ -202,7 +204,16 @@ test("service failures are safe, friendly, and never retried", async () => {
     [{ status: 404 }, "AI_MODEL_UNAVAILABLE", 503],
     [{ name: "AbortError" }, "AI_TIMEOUT", 504],
     [{ message: "Request timed out secret" }, "AI_TIMEOUT", 504],
-    [{ status: 503, message: "secret" }, "AI_SERVICE_ERROR", 502],
+    [{ status: 503, message: "secret" }, "AI_PROVIDER_UNAVAILABLE", 503],
+    [{ status: 500 }, "AI_PROVIDER_UNAVAILABLE", 503],
+    [{ status: 504 }, "AI_TIMEOUT", 504],
+    [{ status: 400, message: "unsupported parameter: secret" }, "AI_BAD_REQUEST", 502],
+    [{ status: 400, message: "API key expired: secret" }, "AI_AUTH_ERROR", 503],
+    [{ status: 402 }, "AI_BILLING_REQUIRED", 503],
+    [{ status: 400, message: "User location is not supported: secret" }, "AI_PRECONDITION_FAILED", 503],
+    [{ message: "fetch failed", cause: { code: "ECONNRESET", message: "secret" } }, "AI_NETWORK_ERROR", 502],
+    [{ cause: { code: "UND_ERR_CONNECT_TIMEOUT" } }, "AI_TIMEOUT", 504],
+    [{ message: "Unknown failure: secret" }, "AI_SERVICE_ERROR", 502],
   ];
   for (const [failure, code, statusCode] of failures) {
     let calls = 0;
@@ -216,4 +227,51 @@ test("service failures are safe, friendly, and never retried", async () => {
     });
     assert.equal(calls, 1);
   }
+});
+
+test("SDK errors produce diagnostic logs without leaking request content or credentials", async (t) => {
+  const log = t.mock.method(console, "error", () => {});
+  const apiError = new ApiError({ status: 400, message: JSON.stringify({error: {
+    code: 400, status: "INVALID_ARGUMENT", message: "Invalid schema; secret-api-key; private-question",
+  }}) });
+  await assert.rejects(generateImportedQuizBatch(single, {
+    model: "gemini-3.5-flash-lite",
+    generateContent: async () => { throw apiError; },
+  }), { code: "AI_BAD_REQUEST", upstreamStatus: 400, providerStatus: "INVALID_ARGUMENT" });
+  assert.equal(log.mock.calls.length, 1);
+  assert.deepEqual(log.mock.calls[0].arguments, ["Gemini quiz generation failed", {
+    code: "AI_BAD_REQUEST", upstreamStatus: 400, providerStatus: "INVALID_ARGUMENT",
+    networkCode: null, model: "gemini-3.5-flash-lite",
+  }]);
+  assert.doesNotMatch(JSON.stringify(log.mock.calls), /secret-api-key|private-question/);
+});
+
+test("structured Google errors retain prerequisite, auth and quota distinctions", async (t) => {
+  const log = t.mock.method(console, "error", () => {});
+  for (const [upstream, expected] of [
+    [{code:400, status:"FAILED_PRECONDITION", message:"secret"}, "AI_PRECONDITION_FAILED"],
+    [{code:429, status:"RESOURCE_EXHAUSTED", message:"secret"}, "AI_QUOTA_EXCEEDED"],
+    [{code:400, status:"INVALID_ARGUMENT", message:"API_KEY_INVALID secret"}, "AI_AUTH_ERROR"],
+  ]) {
+    await assert.rejects(generateImportedQuizBatch(single, {
+      model: "secret-api-key",
+      generateContent: async () => { throw new Error(JSON.stringify({error:upstream})); },
+    }), {code:expected, upstreamStatus:upstream.code});
+  }
+  assert.doesNotMatch(JSON.stringify(log.mock.calls), /secret/);
+});
+
+test("real SDK request trims pasted key whitespace and preserves the quiz schema", async (t) => {
+  const fetch = t.mock.method(globalThis, "fetch", async (_url, init) => {
+    assert.equal(new Headers(init.headers).get("x-goog-api-key"), "test-key");
+    const body = JSON.parse(init.body);
+    assert.equal(body.generationConfig.responseMimeType, "application/json");
+    assert.equal(body.generationConfig.responseJsonSchema.items.properties.distractors.minItems, 3);
+    return new Response(JSON.stringify({candidates:[{content:{parts:[{text:JSON.stringify(valid)}]}}]}), {
+      status:200, headers:{"Content-Type":"application/json"},
+    });
+  });
+  const result = await generateImportedQuizBatch(single, {apiKey:" \n test-key \r\n", ...fixed});
+  assert.equal(fetch.mock.calls.length, 1);
+  assert.equal(result[0].correctAnswer, "Hà Nội");
 });
