@@ -1,10 +1,10 @@
 import React from "react";
 
-const Tabs = ({ tabs, activeTab, setActiveTab }) => {
+const Tabs = ({ tabs, activeTab, setActiveTab, fillHeight = false }) => {
   return (
-    <div className="w-full">
-      <div className="relative border-b-2 border-slate-100">
-        <nav className="flex gap-2">
+    <div className={`w-full min-w-0 ${fillHeight ? "flex min-h-0 flex-1 flex-col" : ""}`}>
+      <div className="relative shrink-0 overflow-x-auto border-b-2 border-slate-100">
+        <nav className="flex gap-2 whitespace-nowrap">
           {tabs.map((tab) => (
             <button
               key={tab.name}
@@ -26,11 +26,11 @@ const Tabs = ({ tabs, activeTab, setActiveTab }) => {
           ))}
         </nav>
       </div>
-      <div className="py-6">
+      <div className={fillHeight ? "min-h-0 flex-1 pt-3" : "py-6"}>
         {tabs.map((tab) => {
           if (tab.name === activeTab) {
             return (
-              <div className="animate-in fade-in duration-300" key={tab.name}>
+              <div className={`animate-in fade-in duration-300 ${fillHeight ? "h-full min-h-0" : ""}`} key={tab.name}>
                 {tab.content}
               </div>
             );

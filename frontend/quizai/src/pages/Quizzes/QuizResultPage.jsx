@@ -41,9 +41,7 @@ function QuizResultContent({ quizId }) {
 
   const chooseQuestion = (index) => {
     setSelectedIndex(index);
-    if (window.matchMedia("(max-width: 1279px)").matches) {
-      tutorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
+    tutorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   return (
@@ -66,7 +64,7 @@ function QuizResultContent({ quizId }) {
         <p className="text-sm text-slate-600 mt-4">{wrong ? "Cùng xem lại các câu chưa đúng. Chọn “Hỏi chatbot” ở mỗi câu để được giải thích." : "Bạn đã trả lời đúng tất cả! Chatbot có thể giúp bạn hiểu sâu hơn các lựa chọn."}</p>
       </div>
 
-      <div className="grid xl:grid-cols-[minmax(0,1fr)_380px] gap-6 items-start">
+      <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] gap-4 xl:gap-6 items-start">
         <div ref={reviewRef} className="min-w-0 space-y-5 scroll-mt-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-lg font-bold text-slate-900">Xem lại đáp án</h2>
@@ -95,8 +93,8 @@ function QuizResultContent({ quizId }) {
             </article>
           ))}
         </div>
-        <aside ref={tutorRef} className="xl:sticky xl:top-6 min-w-0 scroll-mt-6">
-          <button type="button" className="xl:hidden mb-3 text-sm font-semibold text-emerald-700" onClick={() => (document.getElementById(`review-question-${selectedIndex}`) || reviewRef.current)?.scrollIntoView({ behavior: "smooth", block: "start" })}>← Quay lại đáp án</button>
+        <aside ref={tutorRef} className="lg:sticky lg:top-6 min-w-0 scroll-mt-3 sm:scroll-mt-6">
+          <button type="button" className="lg:hidden mb-3 text-sm font-semibold text-emerald-700" onClick={() => (document.getElementById(`review-question-${selectedIndex}`) || reviewRef.current)?.scrollIntoView({ behavior: "smooth", block: "start" })}>← Quay lại đáp án</button>
           {selected && <QuizTutor key={`${quizId}:${selectedIndex}`} quizId={quizId} result={selected} />}
         </aside>
       </div>

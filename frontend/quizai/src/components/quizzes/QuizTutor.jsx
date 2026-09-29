@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { MessageSquare, Send } from "lucide-react";
+import { MessageSquare } from "lucide-react";
 import quizService from "../../services/quizService";
 import MarkdownRenderer from "../common/MarkdownRenderer";
+import ChatComposer from "../chat/ChatComposer";
 
 export default function QuizTutor({ quizId, result }) {
   const [messages, setMessages] = useState([]);
@@ -11,6 +12,7 @@ export default function QuizTutor({ quizId, result }) {
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
   const logRef = useRef(null);
+  const inputRef = useRef(null);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -31,7 +33,7 @@ export default function QuizTutor({ quizId, result }) {
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [messages, sending]);
+  }, [messages, sending, error]);
 
   const send = async (event) => {
     event.preventDefault();
@@ -52,14 +54,17 @@ export default function QuizTutor({ quizId, result }) {
   };
 
   return (
-    <section aria-label="Chatbot giải thích đáp án" className="bg-white border border-emerald-200 rounded-2xl overflow-hidden shadow-sm">
-      <div className="p-5 bg-emerald-50 border-b border-emerald-100">
+    <section aria-label="Chatbot giải thích đáp án" className="flex h-[calc(100dvh-10rem)] max-h-[48rem] min-h-0 flex-col bg-white border border-emerald-200 rounded-2xl overflow-hidden shadow-sm lg:h-[calc(100dvh-7rem)]">
+      <div className="shrink-0 p-3 bg-emerald-50 border-b border-emerald-100">
         <h2 className="font-bold text-emerald-900 flex gap-2 items-center"><MessageSquare size={20} />Hỏi về đáp án</h2>
-        <p className="mt-2 text-sm text-slate-600">Đang trao đổi về <strong>Câu {result.questionIndex + 1}</strong></p>
-        <p className="mt-2 text-sm font-medium text-slate-800 line-clamp-3" title={result.question}>{result.question}</p>
-        <p className="mt-2 text-xs text-slate-600">Bạn chọn: {result.selectedAnswer || "Chưa trả lời"}</p>
+        <p className="mt-1 text-xs text-slate-600">Đang trao đổi về <strong>Câu {result.questionIndex + 1}</strong></p>
       </div>
-      <div ref={logRef} role="log" aria-label="Hội thoại về câu hỏi" aria-live="polite" className="h-72 xl:h-80 overflow-y-auto p-4 space-y-4 overscroll-contain">
+      <div ref={logRef} role="log" aria-label="Hội thoại về câu hỏi" aria-live="polite" className="min-h-0 flex-1 overflow-y-auto p-3 space-y-4 overscroll-contain break-words [overflow-wrap:anywhere]">
+        <details className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
+          <summary className="cursor-pointer font-medium">Xem câu hỏi và đáp án đã chọn</summary>
+          <p className="mt-2 font-medium">{result.question}</p>
+          <p className="mt-2 text-xs">Bạn chọn: {result.selectedAnswer || "Chưa trả lời"}</p>
+        </details>
         {loading ? <p className="text-sm text-slate-500">Đang tải hội thoại…</p> : messages.length === 0 && <p className="text-sm text-slate-500">Hỏi vì sao đáp án sai, so sánh các lựa chọn hoặc nhờ lấy ví dụ. Chatbot sẽ dùng đúng câu đang chọn.</p>}
         {messages.map((item, index) => (
           <div key={index} className={`text-sm rounded-xl px-4 py-3 break-words ${item.role === "user" ? "bg-emerald-50 text-emerald-950 ml-6" : "bg-slate-50 text-slate-800"}`}>
@@ -68,23 +73,15 @@ export default function QuizTutor({ quizId, result }) {
           </div>
         ))}
         {sending && <p className="text-sm text-emerald-700" role="status">Đang phân tích câu hỏi…</p>}
-      </div>
-      <div className="p-4 border-t border-slate-100">
-        <div className="flex flex-wrap gap-2 mb-3">
+        <div className="flex flex-wrap gap-2">
           {[result.isCorrect ? "Vì sao các đáp án còn lại sai?" : result.selectedAnswer ? "Vì sao đáp án mình chọn sai?" : "Giải thích cách chọn đáp án đúng.", "Cho mình một ví dụ dễ hiểu."].map((text) => (
-            <button key={text} type="button" disabled={sending || loading} onClick={() => setMessage(text)} className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-left disabled:opacity-50">{text}</button>
+            <button key={text} type="button" disabled={sending || loading} onClick={() => { setMessage(text); inputRef.current?.focus({ preventScroll: true }); }} className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-left disabled:opacity-50">{text}</button>
           ))}
         </div>
         {error && <div className="mb-3 text-sm text-rose-700" role="alert">{error} <button type="button" disabled={sending || loading} onClick={() => setReload((n) => n + 1)} className="underline">Tải lại hội thoại</button></div>}
-        <form onSubmit={send} className="space-y-2">
-          <label htmlFor="tutor-message" className="sr-only">Câu hỏi cho chatbot</label>
-          <textarea id="tutor-message" value={message} maxLength={2000} rows={3} disabled={sending || loading}
-            onChange={(event) => setMessage(event.target.value)} placeholder="Ví dụ: Vì sao lựa chọn B không đúng?"
-            className="block w-full resize-y border border-slate-300 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
-          <button type="submit" disabled={sending || loading || !message.trim()} className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm py-3 disabled:opacity-50"><Send size={16} />{sending ? "Đang gửi…" : "Gửi câu hỏi"}</button>
-        </form>
-        <p className="text-xs text-slate-500 mt-3">Khi gửi, câu đang chọn và hội thoại liên quan được gửi tới Gemini để giải thích.</p>
       </div>
+      <ChatComposer id="tutor-message" inputRef={inputRef} value={message} onChange={setMessage} onSubmit={send}
+        disabled={loading} sending={sending} maxLength={2000} placeholder="Ví dụ: Vì sao lựa chọn B không đúng?" />
     </section>
   );
 }

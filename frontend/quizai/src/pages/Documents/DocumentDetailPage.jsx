@@ -199,8 +199,8 @@ const DocumentDetailPage = () => {
   }
 
   return (
-    <div>
-      <div className="mb-4">
+    <div className={activeTab === "Chat" ? "flex h-full min-h-0 flex-col" : ""}>
+      <div className="mb-3 shrink-0">
         <Link
           to="/documents"
           className="inline-flex items-center gap-2 text-sm text-neutral-600 hover:text-neutral-900 transition-colors duration-200"
@@ -209,10 +209,10 @@ const DocumentDetailPage = () => {
           Back to Documents
         </Link>
       </div>
-      <PageHeader title={document.title} />
+      {activeTab === "Chat" ? <h1 className="mb-3 shrink-0 truncate text-lg font-semibold text-slate-900" title={document.title}>{document.title}</h1> : <PageHeader title={document.title} />}
       {isExcel && <ExcelQuizStatus document={document} onRetry={retryGeneration} retrying={retrying} retryError={retryError} />}
       {pollError && <p role="status" className="mb-4 text-sm text-amber-700">{pollError}</p>}
-      <Tabs tabs={tabs} activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Tabs tabs={tabs} activeTab={activeTab} setActiveTab={setActiveTab} fillHeight={activeTab === "Chat"} />
     </div>
   );
 };
